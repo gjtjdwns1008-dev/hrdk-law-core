@@ -153,3 +153,106 @@ def get_relevant_certs_text(law_text: str, *, group_by_field: bool = False,
     for field, name in matched:
         grouped.setdefault(field or "기타", []).append(name)
     return "\n".join(f"[{field}] " + ", ".join(names) for field, names in grouped.items())
+
+
+# ──────────────────────────────────────────────────────────
+# 자격명칭 별칭(변천사) 처리 — 구명칭 ↔ 2026 현행명칭
+# ──────────────────────────────────────────────────────────
+_ALIAS_FILENAME = "cert_aliases.csv"
+
+
+def _normalize_cert(s: str) -> str:
+    """종목명 표기 정규화: 가운뎃점·공백·괄호 등 제거 (서비스·경험디자인 = 서비스경험디자인)."""
+    import re
+    return re.sub(r"[·\s\(\)\[\]ㆍ・,]", "", str(s)).strip()
+
+
+@lru_cache(maxsize=2)
+def _load_alias_map() -> dict:
+    """
+    구명칭(정규화) → 현행 2026 명칭 매핑을 반환합니다.
+    cert_aliases.csv가 없으면 빈 dict (별칭 기능 비활성, 오류 없음).
+    """
+    mapping = {}
+    try:
+        data_pkg = resources.files("hrdk_law_core").joinpath("data", _ALIAS_FILENAME)
+        with data_pkg.open("r", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                old = r.get("구명칭", "").strip()
+                new = r.get("현행명칭_2026", "").strip()
+                if old and new:
+                    mapping[_normalize_cert(old)] = new
+    except (FileNotFoundError, ModuleNotFoundError):
+        pass
+    return mapping
+
+
+def resolve_current_name(cert_name: str) -> str:
+    """
+    어떤 종목명(구명칭/표기변형 포함)을 받아 2026 현행 명칭으로 변환합니다.
+
+    동작 순서:
+      1) 현행 종목 목록에 정규화 일치가 있으면 그 현행명 반환
+      2) 별칭 사전(변천사)에 구명칭으로 등록돼 있으면 현행명 반환
+      3) 둘 다 없으면 원본 그대로 반환 (신설/미등록 종목)
+    """
+    norm = _normalize_cert(cert_name)
+
+    # 1) 현행 종목 목록과 정규화 매칭
+    for _field, name in _load_rows():
+        if _normalize_cert(name) == norm:
+            return name
+
+    # 2) 담당자 런타임 오버라이드 우선 (구글 시트에서 추가한 별칭)
+    if norm in _runtime_alias_overrides:
+        return _runtime_alias_overrides[norm]
+
+    # 3) 기본 별칭 사전(구명칭 → 현행명)
+    alias = _load_alias_map()
+    if norm in alias:
+        return alias[norm]
+
+    # 3) 못 찾으면 원본 유지
+    return cert_name
+
+
+def get_alias_count() -> int:
+    """등록된 별칭(구명칭) 개수를 반환합니다."""
+    return len(_load_alias_map())
+
+
+# ──────────────────────────────────────────────────────────
+# B 알림: 법령에서 '명칭 변경' 의심 감지 (자동 변경 ❌, 알림만)
+# ──────────────────────────────────────────────────────────
+def detect_name_change_signal(law_name: str, law_text: str) -> bool:
+    """
+    법령이 국가기술자격 종목 명칭 변경과 관련될 가능성을 가볍게 감지합니다.
+    True가 나오면 '변천사 자료 업데이트가 필요할 수 있다'는 신호일 뿐,
+    절대 자동으로 명칭을 바꾸지 않습니다. (담당자 확인용 알림)
+    """
+    if not law_text:
+        return False
+    # 국가기술자격법 시행규칙 별표 개정 + '명칭' 관련 키워드 동시 등장 시 의심
+    is_qualification_law = "국가기술자격법" in law_name
+    has_name_change_words = any(
+        kw in law_text for kw in ["종목의 명칭", "명칭을", "명칭 변경", "종목을 신설", "종목을 폐지"]
+    )
+    return is_qualification_law and has_name_change_words
+
+
+# 담당자가 구글 시트에서 추가한 별칭(런타임 오버라이드) 저장소
+_runtime_alias_overrides: dict = {}
+
+
+def register_alias_overrides(overrides: dict) -> None:
+    """
+    담당자가 구글 시트 '자격명칭_별칭사전' 탭에 추가한 별칭을 런타임에 등록합니다.
+    기본 사전(cert_aliases.csv)에 더해 적용되며, resolve_current_name()에서 함께 조회됩니다.
+    overrides: {구명칭: 현행명칭} 형태
+    """
+    global _runtime_alias_overrides
+    cleaned = {}
+    for old, new in (overrides or {}).items():
+        if old and new:
+            cleaned[_normalize_cert(old)] = str(new).strip()
+    _runtime_alias_overrides = cleaned

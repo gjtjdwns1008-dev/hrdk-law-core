@@ -25,6 +25,7 @@ hrdk_law_core.hybrid
 """
 
 from .db import KnowledgeBase
+from .certs import resolve_current_name
 
 # 직능연 우대분류 → Track2 효용코드 군(群) 매핑
 # 의미적으로 동등하다고 볼 수 있는 코드 집합
@@ -84,13 +85,18 @@ def verify_with_krivet(law_info: dict, kb: KnowledgeBase) -> dict:
     mismatch_hits = []  # 직능연 분류와 AI 분류가 다른 쌍
 
     for cert in cert_list:
-        pref_type = kb.lookup_preference_type(cert, law_name)
+        # 🌟 [별칭] 구명칭/표기변형을 2026 현행명으로 변환 후 조회 (매칭률 ↑)
+        cert_current = resolve_current_name(cert)
+        pref_type = kb.lookup_preference_type(cert_current, law_name)
+        if pref_type is None and cert_current != cert:
+            # 현행명으로 못 찾으면 원본명으로도 시도 (안전망)
+            pref_type = kb.lookup_preference_type(cert, law_name)
         if pref_type is None:
             continue  # 직능연 DB에 없는 종목
 
-        krivet_hits.append((cert, pref_type))
+        krivet_hits.append((cert_current, pref_type))
         if not _is_semantically_same(pref_type, track2_code):
-            mismatch_hits.append((cert, pref_type, track2_code))
+            mismatch_hits.append((cert_current, pref_type, track2_code))
 
     # ── 판정 ────────────────────────────────────────────
     if not krivet_hits:
