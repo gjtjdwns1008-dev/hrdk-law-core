@@ -69,10 +69,23 @@ def get_base_laws(api_key: str, target_date: str) -> list | None:
     """
     session = _build_session()
 
-    # 조직·직제 등 자격과 무관한 법령 사전 필터 키워드
+    # ──────────────────────────────────────────────────────
+    # 🌟 [버리지 않는 체] 보수적 보류 키워드
+    # 자격증과 '확실하게' 무관한 것만 보류 대상으로 둡니다.
+    # 보류돼도 삭제하지 않고 held_laws에 사유와 함께 기록됩니다(main.py).
+    #
+    # ⚠️ 제거한 위험 키워드 (오탐으로 자격 관련 법령을 놓칠 수 있어 제외):
+    #   - "위원회": 산업안전보건위원회 등 자격 관련 위원회 오탐
+    #   - "인사규정": 자격증 가산점이 인사규정에 있을 수 있음
+    #   - "선거": 너무 광범위 → "선거관리"로 좁힘
+    # ──────────────────────────────────────────────────────
     SKIP_KEYWORDS = [
-        "직제", "행정기구", "사무분장", "분장규정", "위원회", "정원",
-        "위임전결", "선거", "복무규정", "인사규정", "여비규정", "표창규칙",
+        # 조직·기구 (자격 무관 확실)
+        "직제", "행정기구", "사무분장", "분장규정", "정원", "위임전결",
+        # 행정 내부 규정 (자격 무관 확실)
+        "여비규정", "표창규칙", "복무규정",
+        # 자격증과 무관한 영역
+        "조세특례", "관세", "의전", "재외공관", "선거관리",
     ]
 
     all_laws_dict: dict = {}
@@ -128,14 +141,16 @@ def get_base_laws(api_key: str, target_date: str) -> list | None:
 
                     base_law_link = f"https://www.law.go.kr/법령/{law_name}"
 
-                    # 스킵 키워드 필터
-                    if any(k in law_name for k in SKIP_KEYWORDS):
+                    # 스킵 키워드 필터 (버리지 않는 체: 사유를 함께 기록)
+                    matched_kw = next((k for k in SKIP_KEYWORDS if k in law_name), None)
+                    if matched_kw:
                         all_laws_dict[law_name] = {
                             "법령명": law_name, "시행일자": enforce_date,
                             "소관부처": ministry, "공포번호": prom_num,
                             "공포일자": prom_date,
                             "원본": "조직/기구 관련 법령으로 AI 분석 생략",
                             "링크": base_law_link, "스킵여부": True,
+                            "스킵사유": f"보류 키워드 '{matched_kw}' 일치",
                         }
                         continue
 

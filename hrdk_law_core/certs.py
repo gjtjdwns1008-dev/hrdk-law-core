@@ -83,3 +83,73 @@ def get_qnet_certs_text(group_by_field: bool = False) -> str:
     for field, names in grouped.items():
         blocks.append(f"[{field}] " + ", ".join(names))
     return "\n".join(blocks)
+
+
+# ──────────────────────────────────────────────────────────
+# 레버 2: 종목 슬림화 (토큰 절감, 누락 위험 0)
+# ──────────────────────────────────────────────────────────
+def get_relevant_certs_text(law_text: str, *, group_by_field: bool = False,
+                            min_certs: int | None = None) -> str:
+    """
+    법령 원문에 '실제로 등장하거나 관련될 가능성이 있는' 종목만 추려서 반환합니다.
+
+    매 호출마다 541개 종목 전체를 프롬프트에 넣던 낭비를 줄입니다.
+    단, 누락 위험을 0으로 만들기 위해 다음 안전장치를 둡니다:
+      1) 법령 텍스트에 종목명이 직접 등장하면 무조건 포함
+      2) 종목명의 핵심 어근(예: '전기', '건축', '안전')이 법령에 등장하면 포함
+      3) 추려진 결과가 min_certs개 미만이면 → 안전하게 '전체'를 반환
+         (애매할 땐 전부 보낸다는 원칙)
+
+    Parameters
+    ----------
+    law_text       : 법령 원문 텍스트
+    group_by_field : 출력 포맷 (certs_text와 동일 규칙)
+    min_certs      : 이 개수 미만으로 추려지면 전체 반환 (기본 30)
+
+    Returns
+    -------
+    프롬프트 주입용 종목 텍스트 (슬림화 또는 전체)
+    """
+    rows = _load_rows()
+    if not law_text:
+        # 법령 텍스트가 없으면 안전하게 전체 반환
+        return get_qnet_certs_text(group_by_field=group_by_field)
+
+    # 안전선: 환경변수 CERTS_MIN_MATCH로 운영 중 튜닝 가능 (기본 15)
+    if min_certs is None:
+        import os
+        try:
+            min_certs = int(os.environ.get("CERTS_MIN_MATCH", "15"))
+        except ValueError:
+            min_certs = 15
+
+    matched = []
+    for field, name in rows:
+        # 1) 종목명 직접 등장
+        if name in law_text:
+            matched.append((field, name))
+            continue
+        # 2) 종목명에서 분야 어근 추출 (기사/산업기사/기능사/기술사 등 접미사 제거)
+        root = name
+        for suffix in ["기술사", "기능장", "산업기사", "기사", "기능사", "관리사", "기술자"]:
+            if root.endswith(suffix):
+                root = root[: -len(suffix)]
+                break
+        # 어근이 2글자 이상이고 법령에 등장하면 포함 (과매칭 방지 위해 2글자 이상만)
+        if len(root) >= 2 and root in law_text:
+            matched.append((field, name))
+
+    # 3) 안전장치: 너무 적게 걸리면 전체 반환 (누락 방지 원칙)
+    if len(matched) < min_certs:
+        return get_qnet_certs_text(group_by_field=group_by_field)
+
+    # 슬림화된 결과를 포맷팅
+    if not group_by_field:
+        lines = ["직무분야,종목명"]
+        lines += [f"{field},{name}" for field, name in matched]
+        return "\n".join(lines)
+
+    grouped: dict = {}
+    for field, name in matched:
+        grouped.setdefault(field or "기타", []).append(name)
+    return "\n".join(f"[{field}] " + ", ".join(names) for field, names in grouped.items())

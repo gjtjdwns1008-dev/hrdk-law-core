@@ -64,6 +64,20 @@ CREATE INDEX IF NOT EXISTS idx_pref_law_name  ON preference_laws(law_name);
 CREATE INDEX IF NOT EXISTS idx_pref_cert_name ON preference_laws(cert_name);
 CREATE INDEX IF NOT EXISTS idx_daily_law_name ON daily_analysis(law_name);
 CREATE INDEX IF NOT EXISTS idx_daily_mst_id   ON daily_analysis(mst_id);
+
+CREATE TABLE IF NOT EXISTS held_laws (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    law_name      TEXT    NOT NULL,
+    enforce_date  TEXT,
+    ministry      TEXT,
+    hold_reason   TEXT,                          -- 보류 사유 (어떤 키워드/규칙에 걸렸는지)
+    law_link      TEXT,
+    reviewed      INTEGER DEFAULT 0,             -- 담당자 검토 여부 (0=미검토)
+    created_at    TEXT    DEFAULT (datetime('now','localtime')),
+    UNIQUE(law_name, enforce_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_held_reviewed ON held_laws(reviewed);
 """
 
 
@@ -251,3 +265,47 @@ class KnowledgeBase:
                 params,
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ── held_laws (버리지 않는 체: 보류 로그) ──────────────
+
+    def add_held_law(self, law_name: str, enforce_date: str = "",
+                     ministry: str = "", hold_reason: str = "",
+                     law_link: str = "") -> None:
+        """
+        AI 분석을 건너뛴 법령을 '버리지 않고' 사유와 함께 기록합니다.
+        나중에 담당자가 보류 목록을 검토하거나, 필요 시 다시 분석할 수 있습니다.
+        """
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO held_laws (law_name, enforce_date, ministry, hold_reason, law_link)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(law_name, enforce_date) DO UPDATE SET
+                    hold_reason = excluded.hold_reason,
+                    ministry    = excluded.ministry,
+                    law_link    = excluded.law_link
+                """,
+                (law_name, enforce_date, ministry, hold_reason, law_link),
+            )
+
+    def get_held_laws(self, only_unreviewed: bool = True, limit: int = 200) -> list[dict]:
+        """보류된 법령 목록을 반환합니다. (담당자 사후 점검용)"""
+        where = "WHERE reviewed = 0" if only_unreviewed else ""
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM held_laws {where} ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_held_reviewed(self, held_id: int) -> None:
+        """보류 법령을 '검토 완료'로 표시합니다."""
+        with self._conn() as conn:
+            conn.execute("UPDATE held_laws SET reviewed = 1 WHERE id = ?", (held_id,))
+
+    def count_held_laws(self, only_unreviewed: bool = True) -> int:
+        """보류 법령 개수를 반환합니다."""
+        where = "WHERE reviewed = 0" if only_unreviewed else ""
+        with self._conn() as conn:
+            row = conn.execute(f"SELECT COUNT(*) AS c FROM held_laws {where}").fetchone()
+        return row["c"]
