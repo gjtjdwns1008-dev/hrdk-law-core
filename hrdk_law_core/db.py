@@ -78,6 +78,33 @@ CREATE TABLE IF NOT EXISTS held_laws (
 );
 
 CREATE INDEX IF NOT EXISTS idx_held_reviewed ON held_laws(reviewed);
+
+CREATE TABLE IF NOT EXISTS reference_articles (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    seq           INTEGER,                        -- 원자료 연번
+    law_name      TEXT    NOT NULL,               -- 법령명 (정규화 키)
+    law_name_raw  TEXT,                           -- 법령명 (원본)
+    article       TEXT,                           -- 조문내역
+    article_no    TEXT,                           -- 대표 조문번호 (제N조)
+    -- 정책 관점 (Track 1)
+    track1_code   TEXT,                           -- 1차축 코드 (A~E)
+    track1_type   TEXT,                           -- 1차축 유형명
+    track1_risk_code TEXT,                        -- 2차축 코드 (N/L/M/H/C)
+    track1_risk   TEXT,                            -- 2차축 강도명
+    track1_unified TEXT,                          -- 통합코드 (예: C-M)
+    track1_basis  TEXT,                           -- 분류 근거
+    -- 국민 취업 관점 (Track 2)
+    track2_code   TEXT,                           -- 신규코드 (예: Ⅱ-4)
+    track2_type   TEXT,                           -- 세부유형명
+    track2_basis  TEXT,                           -- 분류 근거
+    -- 메타
+    source_year   TEXT    DEFAULT '2022',         -- 기준 연도
+    UNIQUE(law_name, article_no, seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ref_law      ON reference_articles(law_name);
+CREATE INDEX IF NOT EXISTS idx_ref_unified  ON reference_articles(track1_unified);
+CREATE INDEX IF NOT EXISTS idx_ref_t2code   ON reference_articles(track2_code);
 """
 
 
@@ -308,4 +335,57 @@ class KnowledgeBase:
         where = "WHERE reviewed = 0" if only_unreviewed else ""
         with self._conn() as conn:
             row = conn.execute(f"SELECT COUNT(*) AS c FROM held_laws {where}").fetchone()
+        return row["c"]
+
+    # ── reference_articles (383건 AI 재분류 기준조항) ──────
+
+    def upsert_reference_article(self, row: dict) -> None:
+        """383건 재분류 기준조항 한 건을 Upsert합니다."""
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO reference_articles
+                    (seq, law_name, law_name_raw, article, article_no,
+                     track1_code, track1_type, track1_risk_code, track1_risk,
+                     track1_unified, track1_basis, track2_code, track2_type,
+                     track2_basis, source_year)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(law_name, article_no, seq) DO UPDATE SET
+                    track1_code=excluded.track1_code, track1_type=excluded.track1_type,
+                    track1_risk_code=excluded.track1_risk_code, track1_risk=excluded.track1_risk,
+                    track1_unified=excluded.track1_unified, track1_basis=excluded.track1_basis,
+                    track2_code=excluded.track2_code, track2_type=excluded.track2_type,
+                    track2_basis=excluded.track2_basis
+                """,
+                (row.get("seq"), row.get("law_name"), row.get("law_name_raw"),
+                 row.get("article"), row.get("article_no"),
+                 row.get("track1_code"), row.get("track1_type"),
+                 row.get("track1_risk_code"), row.get("track1_risk"),
+                 row.get("track1_unified"), row.get("track1_basis"),
+                 row.get("track2_code"), row.get("track2_type"),
+                 row.get("track2_basis"), row.get("source_year", "2022")),
+            )
+
+    def lookup_reference(self, law_name: str, article_no: str = None) -> list[dict]:
+        """
+        법령명(+조문번호)으로 기준조항 재분류를 조회합니다.
+        하이브리드 검증에서 '이미 확정된 투트랙 코드'를 가져오는 데 사용.
+        """
+        import re
+        norm = re.sub(r"[\s·\(\)\[\]ㆍ・,]", "", str(law_name)).strip().lower()
+        with self._conn() as conn:
+            if article_no:
+                rows = conn.execute(
+                    "SELECT * FROM reference_articles WHERE law_name=? AND article_no=?",
+                    (norm, article_no),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM reference_articles WHERE law_name=?", (norm,),
+                ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_reference_articles(self) -> int:
+        with self._conn() as conn:
+            row = conn.execute("SELECT COUNT(*) AS c FROM reference_articles").fetchone()
         return row["c"]

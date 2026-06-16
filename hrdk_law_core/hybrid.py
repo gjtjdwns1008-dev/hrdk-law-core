@@ -38,6 +38,8 @@ _PREF_TO_TRACK2_GROUP: dict[str, set[str]] = {
 }
 
 # 하이브리드 상태 레이블
+STATUS_REFERENCE = "기준조항_확정"     # 383건 AI 재분류 기준조항과 일치 (최고 신뢰)
+STATUS_REF_PATCH = "기준조항_보정"     # 기준조항과 AI 투트랙이 달라 검토 권고
 STATUS_KRIVET   = "직능연_검증"       # 직능연 기준과 일치
 STATUS_AI_PATCH = "AI_스마트_보정"    # 직능연 기준과 달라 AI 판단으로 보정
 STATUS_AI_NEW   = "AI_신규판단"       # 직능연 정리본에 없는 완전 신규 법령
@@ -74,6 +76,42 @@ def verify_with_krivet(law_info: dict, kb: KnowledgeBase) -> dict:
     law_name    = law_info.get("법령명", "")
     certs_str   = law_info.get("관련 종목", "")
     track2_code = law_info.get("Track2_효용코드", "")
+
+    # ═══════════════════════════════════════════════════════
+    # 1단계 (최우선): 383건 AI 재분류 기준조항 대조
+    # 근거 조문에서 조문번호를 뽑아 기준조항 테이블과 맞춰봅니다.
+    # 일치하면 이미 정밀 검토된 투트랙 코드이므로 최고 신뢰로 처리.
+    # ═══════════════════════════════════════════════════════
+    import re as _re
+    evidence = law_info.get("근거 조문", "") or ""
+    article_nos = _re.findall(r"제\d+조(?:의\d+)?", evidence)
+    ref_rows = []
+    for ano in (article_nos or [None]):
+        ref_rows = kb.lookup_reference(law_name, ano)
+        if ref_rows:
+            break
+    if ref_rows:
+        ref = ref_rows[0]
+        ref_t1 = ref.get("track1_unified", "")   # 예: C-M
+        ref_t2 = ref.get("track2_code", "")       # 예: Ⅱ-4
+        ai_t1 = f"{law_info.get('Track1_취급유형','')}-{law_info.get('Track1_위험도','')}"
+        # 기준조항의 코드를 신뢰 정보로 부착
+        law_info["기준조항_Track1"] = ref_t1
+        law_info["기준조항_Track2"] = ref_t2
+        law_info["기준조항_근거"] = ref.get("track1_basis", "")
+        # AI 분류가 기준조항과 다르면 보정 표식
+        t2_diff = ref_t2 and track2_code and not track2_code.startswith(ref_t2.split("-")[0])
+        if t2_diff:
+            original = law_info.get("상세 분석결과", "")
+            law_info["상세 분석결과"] = (
+                f"📌 [기준조항 대조] 2022 재분류 기준({ref_t1}, {ref_t2})과 "
+                f"AI 분류(Track2:{track2_code})에 차이가 있어 검토를 권고합니다.\n\n" + original
+            )
+            law_info["검토 필요"] = "O"
+            law_info["hybrid_status"] = STATUS_REF_PATCH
+        else:
+            law_info["hybrid_status"] = STATUS_REFERENCE
+        return law_info
 
     if not certs_str or certs_str.strip() in ["", "없음", "N/A"]:
         law_info["hybrid_status"] = STATUS_AI_NEW
