@@ -100,3 +100,22 @@ def mark_done(kb, date_str: str) -> None:
     prev = kb.get_state(STATE_KEY, "")
     if not prev or date_str > prev:
         kb.set_state(STATE_KEY, date_str)
+
+
+def is_valid_target_date(date_str: str) -> bool:
+    """
+    수동 실행용 날짜 검증: YYYYMMDD 형식 + 실제 존재하는 날 + 미래가 아님.
+    - 형식 오류(2026-06-15, 260615 등) → False
+    - 존재하지 않는 날(20260230) → False
+    - 미래 날짜 → False
+    """
+    if not date_str or len(date_str) != 8 or not date_str.isdigit():
+        return False
+    try:
+        d = datetime.strptime(date_str, "%Y%m%d").replace(tzinfo=KST)
+    except ValueError:
+        return False
+    # 미래 날짜 금지 (오늘까지 허용)
+    if d.date() > _today_kst().date():
+        return False
+    return True
