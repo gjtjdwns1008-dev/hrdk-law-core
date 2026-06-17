@@ -256,3 +256,46 @@ def register_alias_overrides(overrides: dict) -> None:
         if old and new:
             cleaned[_normalize_cert(old)] = str(new).strip()
     _runtime_alias_overrides = cleaned
+
+
+# ══════════════════════════════════════════════════════════
+# Track 코드 → 한글 병기 변환 (구글 시트 표기용)
+# ⚠️ SQLite에는 순수 코드를 저장하고, 시트에 쓸 때만 이 변환을 적용합니다.
+#    (시트=사람이 보는 용도, SQLite=기계 활용 용도)
+# ══════════════════════════════════════════════════════════
+TRACK1_TYPE_KO = {
+    "A": "신분형성형", "B": "영업요건형", "C": "직역독점형",
+    "D": "인사가산형", "E": "검정연계형", "Z": "제외",
+}
+TRACK1_RISK_KO = {
+    "C": "임계위험★★", "H": "고위험★", "L": "저위험",
+    "M": "중위험", "N": "무관", "X": "해당없음",
+}
+TRACK2_CODE_KO = {
+    "Ⅰ-1": "면허전환형", "Ⅰ-2": "개업창업형",
+    "Ⅱ-1": "등록필수형", "Ⅱ-2": "지정인력형", "Ⅱ-3": "전속배치형",
+    "Ⅱ-4": "선택배치형", "Ⅱ-5": "현장배치형",
+    "Ⅲ-1": "부가우대형", "Ⅲ-2": "부가우대형", "Ⅲ-3": "부가우대형",
+    "Ⅳ-0": "제외",
+}
+
+
+def label_track1_type(code: str) -> str:
+    """예: 'B' → 'B (영업요건형)'. 매핑에 없거나 빈 값이면 원본 그대로."""
+    code = (code or "").strip()
+    ko = TRACK1_TYPE_KO.get(code)
+    return f"{code} ({ko})" if ko else code
+
+
+def label_track1_risk(code: str) -> str:
+    """예: 'M' → 'M (중위험)'."""
+    code = (code or "").strip()
+    ko = TRACK1_RISK_KO.get(code)
+    return f"{code} ({ko})" if ko else code
+
+
+def label_track2_code(code: str) -> str:
+    """예: 'Ⅱ-1' → 'Ⅱ-1 (등록필수형)'."""
+    code = (code or "").strip()
+    ko = TRACK2_CODE_KO.get(code)
+    return f"{code} ({ko})" if ko else code
