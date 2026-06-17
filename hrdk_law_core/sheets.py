@@ -111,8 +111,10 @@ def upsert_daily_summary_row(
         return
 
     kst_now = datetime.now(timezone(timedelta(hours=9)))
-    hhmm = kst_now.strftime("%H:%M")
-    this_attempt = f"{hhmm}{status_symbol}"
+    # 상태 칸 표기: "MM/DD HH:MM심볼" — 며칠에 시도했는지(실행일)까지 보이도록
+    # (A열은 '처리 대상 날짜', 상태 칸 날짜는 '시도한 날' → 둘이 다르면 백필/수동이란 뜻)
+    stamp = kst_now.strftime("%m/%d %H:%M")
+    this_attempt = f"{stamp}{status_symbol}"
 
     try:
         all_values = ws.get_all_values()
