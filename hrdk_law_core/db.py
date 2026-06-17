@@ -267,7 +267,7 @@ class KnowledgeBase:
                     law_info.get("검토 필요"),
                     law_info.get("검토 사유"),
                     law_info.get("조문별 다이렉트 링크"),
-                    law_info.get("워크넷_실시간_구인건수"),
+                    law_info.get("워크넷 실시간 구인건수"),
                     law_info.get("hybrid_status"),
                 ),
             )
