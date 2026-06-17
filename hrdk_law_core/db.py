@@ -105,6 +105,11 @@ CREATE TABLE IF NOT EXISTS reference_articles (
 CREATE INDEX IF NOT EXISTS idx_ref_law      ON reference_articles(law_name);
 CREATE INDEX IF NOT EXISTS idx_ref_unified  ON reference_articles(track1_unified);
 CREATE INDEX IF NOT EXISTS idx_ref_t2code   ON reference_articles(track2_code);
+
+CREATE TABLE IF NOT EXISTS sync_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
 """
 
 
@@ -389,3 +394,85 @@ class KnowledgeBase:
         with self._conn() as conn:
             row = conn.execute("SELECT COUNT(*) AS c FROM reference_articles").fetchone()
         return row["c"]
+
+    # ── 우대사항 대장 (법령+조문 단위 현황) ────────────────
+
+    def build_ledger_rows(self, resolve_fn=None) -> list[dict]:
+        """
+        법령+조문 단위로 우대사항 대장 행을 생성합니다.
+        각 행에 해당 자격종목 목록을 현행명으로 붙입니다.
+
+        resolve_fn: 종목명을 현행명으로 변환하는 함수(없으면 원본 사용).
+                    보통 certs.resolve_current_name 을 넘깁니다.
+        """
+        with self._conn() as conn:
+            # 직능연 정리본을 법령 단위로 집계 (조문내역 + 종목목록)
+            rows = conn.execute("""
+                SELECT law_name, law_name_raw, article_text, preference_type,
+                       GROUP_CONCAT(DISTINCT cert_name) AS certs
+                FROM preference_laws
+                GROUP BY law_name, article_text, preference_type
+                ORDER BY law_name_raw
+            """).fetchall()
+
+        ledger = []
+        for r in rows:
+            certs_raw = (r["certs"] or "").split(",")
+            # 종목명을 현행명으로 변환 (중복 제거)
+            if resolve_fn:
+                certs_cur = []
+                seen = set()
+                for c in certs_raw:
+                    cur = resolve_fn(c.strip())
+                    if cur and cur not in seen:
+                        seen.add(cur); certs_cur.append(cur)
+            else:
+                certs_cur = [c.strip() for c in certs_raw if c.strip()]
+
+            # 기준조항(383건)에서 투트랙 코드 조회
+            ref = self.lookup_reference(r["law_name_raw"] or "")
+            t1_type = ref[0]["track1_code"] if ref else ""        # 취급유형 A~E
+            t1_risk = ref[0]["track1_risk_code"] if ref else ""   # 위험도 N/L/M/H/C
+            t2 = ref[0]["track2_code"] if ref else ""             # 효용코드 Ⅰ~Ⅳ
+
+            ledger.append({
+                "법령명": r["law_name_raw"],
+                "조문": r["article_text"] or "",
+                "우대분류": r["preference_type"] or "",
+                "해당 자격종목": ", ".join(certs_cur),
+                "Track1_취급유형": t1_type,
+                "Track1_위험도": t1_risk,
+                "Track2_효용코드": t2,
+                "상태": "기존",
+                "최근변경일": "",
+                "비고": "",
+            })
+        return ledger
+
+    def rename_cert_everywhere(self, old_name: str, new_name: str) -> int:
+        """
+        명칭 변경: SQLite의 모든 종목명(old → new)을 일괄 갱신합니다.
+        preference_laws의 cert_name을 현행명으로 UPDATE.
+        반환: 변경된 행 수.
+        """
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE preference_laws SET cert_name = ? WHERE cert_name = ?",
+                (new_name, old_name),
+            )
+            return cur.rowcount
+
+    # ── sync_state (백필용: 마지막 성공일 추적) ────────────
+
+    def get_state(self, key: str, default: str = "") -> str:
+        with self._conn() as conn:
+            row = conn.execute("SELECT value FROM sync_state WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_state(self, key: str, value: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO sync_state (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )

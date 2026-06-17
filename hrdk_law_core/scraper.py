@@ -22,7 +22,21 @@ from urllib3.util.retry import Retry
 # ──────────────────────────────────────────────
 # 🛡️ 1차 방어: urllib3 레벨 자동 재시도 세션
 # ──────────────────────────────────────────────
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+# 🌟 [핵심] 법제처 OPEN API는 Referer 헤더가 없으면 OC 키가 유효해도
+# "사용자 정보 검증에 실패하였습니다(IP/도메인 등록)" 오류를 반환합니다.
+# 메시지는 IP 문제로 오인되기 쉬우나 실제 원인은 Referer 누락인 경우가 많습니다.
+# 또한 Node/Python 기본 UA는 봇으로 분류되어 거부되므로 브라우저 UA를 사용합니다.
+# (참고: korean-law-mcp v4.0.9의 동일 증상 해결 사례)
+# 환경변수 LAW_REFERER / LAW_USER_AGENT로 override 가능.
+import os as _os
+HEADERS = {
+    "User-Agent": _os.environ.get(
+        "LAW_USER_AGENT",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    ),
+    "Referer": _os.environ.get("LAW_REFERER", "https://www.law.go.kr/"),
+}
 
 def _build_session() -> requests.Session:
     """재시도 로직이 탑재된 requests 세션을 반환합니다."""
