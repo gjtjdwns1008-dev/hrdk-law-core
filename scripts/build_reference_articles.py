@@ -22,6 +22,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pandas as pd
 from hrdk_law_core.db import KnowledgeBase
+# Track2 세부유형명은 certs의 매핑을 단일 기준으로 사용
+# (원본 CSV의 '신규세부유형'은 Ⅲ을 모두 '부가우대형'으로 뭉뚱그려 놓았으므로,
+#  코드를 보고 정확한 세부명으로 보정한다)
+from hrdk_law_core.certs import TRACK2_CODE_KO
 
 
 def readcsv(f):
@@ -82,7 +86,12 @@ def main():
             "track1_basis": str(r.get("1차축 근거", "") or "").strip(),
             # Track 2 (국민)
             "track2_code": str(nat_row.get("신규코드", "") if nat_row is not None else "").strip(),
-            "track2_type": str(nat_row.get("신규세부유형", "") if nat_row is not None else "").strip(),
+            # 세부유형명: 원본 CSV는 Ⅲ을 모두 '부가우대형'으로 뭉뚱그려 놓았으므로
+            # 코드(Ⅲ-1/2/3 등)를 보고 certs의 정확한 세부명으로 보정. 매핑에 없으면 원본값 유지.
+            "track2_type": TRACK2_CODE_KO.get(
+                str(nat_row.get("신규코드", "") if nat_row is not None else "").strip(),
+                str(nat_row.get("신규세부유형", "") if nat_row is not None else "").strip()
+            ),
             "track2_basis": str(nat_row.get("분류 근거", "") if nat_row is not None else "").strip(),
             "source_year": "2022",
         })
