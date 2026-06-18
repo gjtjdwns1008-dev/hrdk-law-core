@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS daily_analysis (
     track1_type         TEXT,                     -- Track1_취급유형
     track1_risk         TEXT,                     -- Track1_위험도
     track2_code         TEXT,                     -- Track2_효용코드
+    is_serious_accident TEXT,                     -- 중처법대상 (대상/비대상)
     summary             TEXT,                     -- 조문 요약
     detail_analysis     TEXT,                     -- 상세 분석결과
     evidence_article    TEXT,                     -- 근거 조문
@@ -224,11 +225,12 @@ class KnowledgeBase:
                 """
                 INSERT INTO daily_analysis
                     (mst_id, law_name, enforce_date, ministry, related_certs,
-                     relevance, track1_type, track1_risk, track2_code, summary,
+                     relevance, track1_type, track1_risk, track2_code,
+                     is_serious_accident, summary,
                      detail_analysis, evidence_article, ai_confidence,
                      needs_review, review_reason, direct_links, worknet_demand,
                      hybrid_status, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                         datetime('now','localtime'))
                 ON CONFLICT(mst_id) DO UPDATE SET
                     law_name         = excluded.law_name,
@@ -239,6 +241,7 @@ class KnowledgeBase:
                     track1_type      = excluded.track1_type,
                     track1_risk      = excluded.track1_risk,
                     track2_code      = excluded.track2_code,
+                    is_serious_accident = excluded.is_serious_accident,
                     summary          = excluded.summary,
                     detail_analysis  = excluded.detail_analysis,
                     evidence_article = excluded.evidence_article,
@@ -260,12 +263,13 @@ class KnowledgeBase:
                     law_info.get("Track1_취급유형"),
                     law_info.get("Track1_위험도"),
                     law_info.get("Track2_효용코드"),
+                    law_info.get("중처법대상"),
                     law_info.get("조문 요약"),
-                    law_info.get("상세 분석결과"),
-                    law_info.get("근거 조문"),
-                    law_info.get("AI 신뢰도"),
-                    law_info.get("검토 필요"),
-                    law_info.get("검토 사유"),
+                    law_info.get("상세 분석 결과"),
+                    law_info.get("근거조문"),
+                    law_info.get("AI신뢰도"),
+                    law_info.get("검토필요"),
+                    law_info.get("검토사유"),
                     law_info.get("조문별 다이렉트 링크"),
                     law_info.get("워크넷 실시간 구인건수"),
                     law_info.get("hybrid_status"),
@@ -409,7 +413,8 @@ class KnowledgeBase:
             # 직능연 정리본을 법령 단위로 집계 (조문내역 + 종목목록)
             rows = conn.execute("""
                 SELECT law_name, law_name_raw, article_text, preference_type,
-                       GROUP_CONCAT(DISTINCT cert_name) AS certs
+                       GROUP_CONCAT(DISTINCT cert_name) AS certs,
+                       MAX(is_hazard_law) AS is_hazard
                 FROM preference_laws
                 GROUP BY law_name, article_text, preference_type
                 ORDER BY law_name_raw
@@ -443,6 +448,7 @@ class KnowledgeBase:
                 "Track1_취급유형": t1_type,
                 "Track1_위험도": t1_risk,
                 "Track2_효용코드": t2,
+                "중처법대상": "대상" if r["is_hazard"] else "",
                 "상태": "기존",
                 "최근변경일": "",
                 "비고": "",
