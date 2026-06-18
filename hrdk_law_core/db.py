@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS daily_analysis (
     ministry            TEXT,
     related_certs       TEXT,                     -- 쉼표 구분 종목 목록
     relevance           TEXT,                     -- 연관성_판별
+    preference_type     TEXT,                     -- 우대분류 (의무고용/직무권한부여/인사우대/시험면제/기타)
     track1_type         TEXT,                     -- Track1_취급유형
     track1_risk         TEXT,                     -- Track1_위험도
     track2_code         TEXT,                     -- Track2_효용코드
@@ -225,12 +226,12 @@ class KnowledgeBase:
                 """
                 INSERT INTO daily_analysis
                     (mst_id, law_name, enforce_date, ministry, related_certs,
-                     relevance, track1_type, track1_risk, track2_code,
+                     relevance, preference_type, track1_type, track1_risk, track2_code,
                      is_serious_accident, summary,
                      detail_analysis, evidence_article, ai_confidence,
                      needs_review, review_reason, direct_links, worknet_demand,
                      hybrid_status, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                         datetime('now','localtime'))
                 ON CONFLICT(mst_id) DO UPDATE SET
                     law_name         = excluded.law_name,
@@ -238,6 +239,7 @@ class KnowledgeBase:
                     ministry         = excluded.ministry,
                     related_certs    = excluded.related_certs,
                     relevance        = excluded.relevance,
+                    preference_type  = excluded.preference_type,
                     track1_type      = excluded.track1_type,
                     track1_risk      = excluded.track1_risk,
                     track2_code      = excluded.track2_code,
@@ -260,6 +262,7 @@ class KnowledgeBase:
                     law_info.get("소관부처"),
                     law_info.get("관련 종목"),
                     law_info.get("연관성_판별"),
+                    law_info.get("우대분류"),
                     law_info.get("Track1_취급유형"),
                     law_info.get("Track1_위험도"),
                     law_info.get("Track2_효용코드"),
