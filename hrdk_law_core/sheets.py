@@ -56,7 +56,7 @@ def log_to_summary_sheet(
     """
     총괄현황표 탭에 실행 결과를 한 줄 추가합니다.
 
-    5개 컬럼: 시행일자(법령 효력 발생일) | 총 검토건수 | 연관 법령건수 | 모니터링 상태 | 실행 로그
+    5개 컬럼: 수집일자(KST) | 총 검토건수 | 연관 법령건수 | 모니터링 상태 | 실행 로그
     """
     try:
         summary_sheet = spreadsheet.worksheet("총괄현황표")
@@ -174,9 +174,9 @@ def read_last_success_date(gcp_service_account_json: str, sheet_url: str,
         이미 처리한 날짜를 다시 분석하지 않도록 함.
 
     성공 판정: '모니터링 상태' 칸에 '🟢' 또는 '정상 작동'이 있는 행.
-      (연결 실패 행은 🔴만 있고 시행일자 칸이 '오늘'로 기록되므로 자동 제외됨)
+      (연결 실패 행은 🔴만 있고 수집일자가 '오늘'로 기록되므로 자동 제외됨)
 
-    반환: 성공한 행 중 가장 최근 '시행일자' (YYYYMMDD). 없으면 "".
+    반환: 성공한 행 중 가장 최근 '수집일자' (YYYYMMDD). 없으면 "".
     """
     try:
         ss = get_sheet_client(gcp_service_account_json, sheet_url)
@@ -192,15 +192,8 @@ def read_last_success_date(gcp_service_account_json: str, sheet_url: str,
             return ""
 
         header = records[0]
-        # '시행일자'(권장) 우선, 기존 '수집일자'도 폴백 지원 (시트 헤더 변경 과도기 대응)
-        date_idx = None
-        for cand in ("시행일자", "수집일자"):
-            if cand in header:
-                date_idx = header.index(cand)
-                break
-        if date_idx is None:
-            return ""
         try:
+            date_idx = header.index("수집일자")
             status_idx = header.index("모니터링 상태")
         except ValueError:
             return ""
