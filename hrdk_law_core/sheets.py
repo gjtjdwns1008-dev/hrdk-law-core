@@ -186,7 +186,8 @@ def read_last_success_date(gcp_service_account_json: str, sheet_url: str,
     반환: 성공한 행 중 가장 최근 '시행일자' (YYYYMMDD). 없으면 "".
     """
     try:
-        ss = get_sheet_client(gcp_service_account_json, sheet_url)
+        # get_sheet_client은 (client, spreadsheet) 튜플을 반환 → 두 번째(스프레드시트)만 사용
+        _, ss = get_sheet_client(gcp_service_account_json, sheet_url)
         if ss is None:
             return ""
         try:
