@@ -119,14 +119,21 @@ def upsert_daily_summary_row(
     try:
         all_values = ws.get_all_values()
         header = all_values[0] if all_values else []
-        # 상태/로그 컬럼 인덱스 (없으면 끝에 가정)
-        try:
-            status_idx = header.index(status_col_name)
-        except ValueError:
+        # 상태/로그 컬럼 인덱스 (헤더 표기 차이 대응: RADAR='모니터링 상태'/'실행 로그 및 비고',
+        #  monitor='상태'/'로그' 등 어느 쪽이든 찾도록 폴백. 없으면 끝에 가정)
+        status_idx = None
+        for cand in (status_col_name, "모니터링 상태", "상태"):
+            if cand and cand in header:
+                status_idx = header.index(cand)
+                break
+        if status_idx is None:
             status_idx = len(cols_before_status)
-        try:
-            log_idx = header.index(log_col_name)
-        except ValueError:
+        log_idx = None
+        for cand in (log_col_name, "실행 로그 및 비고", "실행 로그", "로그"):
+            if cand and cand in header:
+                log_idx = header.index(cand)
+                break
+        if log_idx is None:
             log_idx = status_idx + 1
 
         # 같은 날짜 행 찾기 (A열 = 날짜)
@@ -200,9 +207,13 @@ def read_last_success_date(gcp_service_account_json: str, sheet_url: str,
                 break
         if date_idx is None:
             return ""
-        try:
-            status_idx = header.index("모니터링 상태")
-        except ValueError:
+        # 상태 칸: RADAR는 '모니터링 상태', monitor는 '상태'로 헤더가 다름 → 둘 다 인식
+        status_idx = None
+        for cand in ("상태", "모니터링 상태"):
+            if cand in header:
+                status_idx = header.index(cand)
+                break
+        if status_idx is None:
             return ""
 
         success_dates = []
