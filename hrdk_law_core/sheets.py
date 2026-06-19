@@ -161,3 +161,63 @@ def upsert_daily_summary_row(
             print(f"  📊 [총괄현황표] {target_date_display} 누적 ({new_status})")
     except Exception as e:
         print(f"  ⚠️ 총괄현황표 누적 기록 실패: {e}")
+
+
+def read_last_success_date(gcp_service_account_json: str, sheet_url: str,
+                           sheet_name: str = "총괄현황표") -> str:
+    """
+    총괄현황표에서 '마지막으로 분석 성공한 시행일자'를 읽어 YYYYMMDD로 반환합니다.
+
+    설계 의도 (SQLite 휘발 대응):
+      GitHub Actions는 매 실행마다 SQLite가 초기화되어 last_success_date가 사라짐.
+      → 영구 저장소인 구글시트(총괄현황표)에서 직접 마지막 성공일을 읽어,
+        이미 처리한 날짜를 다시 분석하지 않도록 함.
+
+    성공 판정: '모니터링 상태' 칸에 '🟢' 또는 '정상 작동'이 있는 행.
+      (연결 실패 행은 🔴만 있고 수집일자가 '오늘'로 기록되므로 자동 제외됨)
+
+    반환: 성공한 행 중 가장 최근 '수집일자' (YYYYMMDD). 없으면 "".
+    """
+    try:
+        ss = get_sheet_client(gcp_service_account_json, sheet_url)
+        if ss is None:
+            return ""
+        try:
+            ws = ss.worksheet(sheet_name)
+        except Exception:
+            return ""  # 총괄현황표가 아직 없음 → 최초 실행으로 간주
+
+        records = ws.get_all_values()
+        if len(records) <= 1:
+            return ""
+
+        header = records[0]
+        try:
+            date_idx = header.index("수집일자")
+            status_idx = header.index("모니터링 상태")
+        except ValueError:
+            return ""
+
+        success_dates = []
+        for row in records[1:]:
+            if date_idx >= len(row) or status_idx >= len(row):
+                continue
+            date_raw = (row[date_idx] or "").strip()
+            status = (row[status_idx] or "").strip()
+            if not date_raw:
+                continue
+            # 성공 판정
+            is_success = ("🟢" in status) or ("정상 작동" in status)
+            if not is_success:
+                continue
+            # 날짜 정규화: '2026-06-18' → '20260618'
+            digits = "".join(ch for ch in date_raw if ch.isdigit())
+            if len(digits) == 8:
+                success_dates.append(digits)
+
+        if not success_dates:
+            return ""
+        return max(success_dates)  # 가장 최근 성공일
+    except Exception as e:
+        print(f"  ⚠️ 마지막 성공일 읽기 실패: {e}")
+        return ""

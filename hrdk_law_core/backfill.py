@@ -60,18 +60,26 @@ def check_law_reachable(api_key: str, timeout: int = 20) -> bool:
         return False
 
 
-def pending_dates(kb, *, max_days: int | None = None) -> list[str]:
+def pending_dates(kb, *, max_days: int | None = None,
+                  last_success_override: str | None = None) -> list[str]:
     """
     처리해야 할 시행일자 목록을 과거→현재 순으로 반환합니다 (YYYYMMDD).
 
     범위: (마지막 성공일 + 1일) ~ 어제
     - 마지막 성공일 기록이 없으면 DEFAULT_LOOKBACK_DAYS 전부터
     - max_days: 한 번에 처리할 최대 일수 상한 (None=무제한, 밀린 건 다 처리)
+    - last_success_override: 외부(구글시트)에서 읽은 마지막 성공일.
+        SQLite가 휘발되는 GitHub Actions 환경에서, 시트값을 우선 사용해
+        이미 처리한 날짜를 다시 분석하지 않도록 함. None이면 SQLite(get_state) 사용.
     """
     today = _today_kst()
     yesterday = today - timedelta(days=1)
 
-    last = kb.get_state(STATE_KEY, "")
+    # 마지막 성공일: 시트값(override) 우선, 없으면 SQLite
+    if last_success_override:
+        last = last_success_override
+    else:
+        last = kb.get_state(STATE_KEY, "")
     if last:
         try:
             start = datetime.strptime(last, "%Y%m%d").replace(tzinfo=KST) + timedelta(days=1)
