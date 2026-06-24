@@ -14,7 +14,7 @@ setup(
     install_requires=[
         "requests>=2.31.0",
         "urllib3>=2.0.0",
-        "gspread>=5.12.0",
+        "gspread>=5.12.0,<7",
         "oauth2client>=4.1.3",
         "openpyxl>=3.1.2",
         "pandas>=2.0.0",
