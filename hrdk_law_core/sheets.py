@@ -159,12 +159,12 @@ def upsert_daily_summary_row(
             new_status = (existing_status + " → " + this_attempt) if existing_status else this_attempt
             col_letter = get_column_letter(status_idx + 1)
             log_letter = get_column_letter(log_idx + 1)
-            ws.update(f"{col_letter}{target_row_num}", [[new_status]], value_input_option="RAW")
+            ws.update(range_name=f"{col_letter}{target_row_num}", values=[[new_status]], value_input_option="RAW")
             if log:
-                ws.update(f"{log_letter}{target_row_num}", [[log]], value_input_option="RAW")
+                ws.update(range_name=f"{log_letter}{target_row_num}", values=[[log]], value_input_option="RAW")
             # 건수 칸들도 최신값으로 갱신 (성공 시 의미 있음)
             for ci, val in enumerate(cols_before_status[1:], start=2):
-                ws.update(f"{get_column_letter(ci)}{target_row_num}", [[val]], value_input_option="RAW")
+                ws.update(range_name=f"{get_column_letter(ci)}{target_row_num}", values=[[val]], value_input_option="RAW")
             print(f"  📊 [총괄현황표] {target_date_display} 누적 ({new_status})")
     except Exception as e:
         print(f"  ⚠️ 총괄현황표 누적 기록 실패: {e}")
