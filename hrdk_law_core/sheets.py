@@ -185,7 +185,30 @@ def read_last_success_date(gcp_service_account_json: str, sheet_url: str,
 
     반환: 성공한 행 중 가장 최근 '시행일자' (YYYYMMDD). 없으면 "".
     """
-    try:
+    import time as _time
+    # 구글 시트 503/일시 오류 대비: 최대 3회 재시도(2초 간격) 후에도 실패하면 예외를 올린다.
+    # (조용히 ""를 반환하면 호출부가 '처리 이력 없음'으로 오인해 같은 날을 재처리/0 기록할 수 있음)
+    last_err = None
+    for attempt in range(3):
+        try:
+            return _read_last_success_date_once(gcp_service_account_json, sheet_url, sheet_name)
+        except Exception as e:
+            last_err = e
+            msg = str(e)
+            transient = ("503" in msg or "500" in msg or "502" in msg or "504" in msg
+                         or "unavailable" in msg.lower() or "timed out" in msg.lower()
+                         or "timeout" in msg.lower() or "rate" in msg.lower())
+            if attempt < 2 and transient:
+                _time.sleep(2)
+                continue
+            raise
+    raise last_err if last_err else RuntimeError("read_last_success_date 실패")
+
+
+def _read_last_success_date_once(gcp_service_account_json: str, sheet_url: str,
+                                 sheet_name: str = "총괄현황표") -> str:
+    """read_last_success_date의 1회 시도 본체. (재시도는 상위 래퍼가 담당)"""
+    if True:
         # get_sheet_client은 (client, spreadsheet) 튜플을 반환 → 두 번째(스프레드시트)만 사용
         _, ss = get_sheet_client(gcp_service_account_json, sheet_url)
         if ss is None:
@@ -237,6 +260,3 @@ def read_last_success_date(gcp_service_account_json: str, sheet_url: str,
         if not success_dates:
             return ""
         return max(success_dates)  # 가장 최근 성공일
-    except Exception as e:
-        print(f"  ⚠️ 마지막 성공일 읽기 실패: {e}")
-        return ""
