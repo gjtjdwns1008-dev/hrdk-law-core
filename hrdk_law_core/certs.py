@@ -299,3 +299,40 @@ def label_track2_code(code: str) -> str:
     code = (code or "").strip()
     ko = TRACK2_CODE_KO.get(code)
     return f"{code} ({ko})" if ko else code
+
+
+# 정규화 매칭용 사전 캐시 (정규화키 → 정식 종목명)
+_DICT_NORM_CACHE = None
+
+def _dict_norm_map():
+    global _DICT_NORM_CACHE
+    if _DICT_NORM_CACHE is None:
+        _DICT_NORM_CACHE = {_normalize_cert(n): n for n in get_qnet_certs_list()}
+    return _DICT_NORM_CACHE
+
+
+def normalize_cert_string(raw):
+    """
+    AI가 반환한 '관련 종목' 문자열을 자격증 사전(541종목)에 있는 정식 종목명만 남깁니다.
+
+    - 괄호 안 쉼표는 보호('소방설비기사(기계분야)'가 안 깨지게)
+    - 구명칭·표기변형은 resolve_current_name으로 현행명 변환 후 사전 대조
+    - 사전에 없는 범주형/임의 표현('~전체', '~등 직무분야 종목' 등)은 제외
+
+    반환: (정식종목 콤마문자열, 제외된_표현_리스트)
+    """
+    import re as _re
+    s = str(raw or "")
+    s = _re.sub(r"\(([^)]*)\)", lambda m: "(" + m.group(1).replace(",", "§") + ")", s)
+    toks = [t.strip().replace("§", ",") for t in _re.split(r"[,/]", s) if t.strip()]
+    dnorm = _dict_norm_map()
+    kept, dropped, seen = [], [], set()
+    for t in toks:
+        name = resolve_current_name(t)
+        std = dnorm.get(_normalize_cert(name))
+        if std:
+            if std not in seen:
+                seen.add(std); kept.append(std)
+        else:
+            dropped.append(t)
+    return ", ".join(kept), dropped
