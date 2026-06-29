@@ -178,8 +178,9 @@ def _load_alias_map() -> dict:
         data_pkg = resources.files("hrdk_law_core").joinpath("data", _ALIAS_FILENAME)
         with data_pkg.open("r", encoding="utf-8") as f:
             for r in csv.DictReader(f):
-                old = r.get("구명칭", "").strip()
-                new = r.get("현행명칭_2026", "").strip()
+                old = (r.get("구명칭") or "").strip()
+                # 새 컬럼명 '현행명칭' 우선, 없으면 옛 '현행명칭_2026' 폴백(하위호환)
+                new = (r.get("현행명칭") or r.get("현행명칭_2026") or "").strip()
                 if old and new:
                     mapping[_normalize_cert(old)] = new
     except (FileNotFoundError, ModuleNotFoundError):
