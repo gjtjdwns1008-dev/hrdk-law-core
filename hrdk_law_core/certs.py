@@ -21,22 +21,66 @@ law-monitor와 HRDK-LAW-RADAR가 모두 이 모듈을 통해 종목을 읽습니
 """
 
 import csv
+import re
 from functools import lru_cache
 from importlib import resources
 
-# 패키지에 동봉된 종목 CSV 파일명. 연도 갱신 시 이 상수만 바꾸면 됩니다.
+# 패키지에 동봉된 종목 CSV 파일명(기본/폴백용). 연도 미지정 시 이 파일을 씁니다.
 _CSV_FILENAME = "qnet_certs_2026.csv"
+_CSV_PREFIX = "qnet_certs_"   # 연도별 파일: qnet_certs_2026.csv, qnet_certs_2027.csv ...
 
 
-@lru_cache(maxsize=4)
-def _load_rows() -> tuple:
+def _available_cert_years() -> list:
+    """data 폴더에 존재하는 qnet_certs_{YYYY}.csv 의 연도 목록(오름차순)."""
+    years = []
+    try:
+        data_dir = resources.files("hrdk_law_core").joinpath("data")
+        for entry in data_dir.iterdir():
+            nm = entry.name
+            m = re.match(rf"^{_CSV_PREFIX}(\d{{4}})\.csv$", nm)
+            if m:
+                years.append(int(m.group(1)))
+    except Exception:
+        pass
+    return sorted(years)
+
+
+def _resolve_cert_filename(year=None) -> str:
+    """
+    종목 CSV 파일명을 연도 기준으로 고른다.
+      · year 지정 → qnet_certs_{year}.csv 가 있으면 그것
+      · 그 파일이 없으면 → 존재하는 연도 중 'year 이하의 가장 가까운 연도'로 폴백,
+        그것도 없으면 '가장 이른 연도'로 폴백
+      · year 미지정 → 기본 상수(_CSV_FILENAME)
+    파일이 하나도 없으면 기본 상수를 그대로 반환(기존 동작 유지).
+    """
+    if year is None:
+        return _CSV_FILENAME
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        return _CSV_FILENAME
+    avail = _available_cert_years()
+    if not avail:
+        return _CSV_FILENAME
+    if year in avail:
+        return f"{_CSV_PREFIX}{year}.csv"
+    # 폴백: year 이하 중 가장 큰 연도(=그 시점에 유효했던 최신 명단), 없으면 가장 이른 연도
+    below = [y for y in avail if y <= year]
+    chosen = max(below) if below else min(avail)
+    return f"{_CSV_PREFIX}{chosen}.csv"
+
+
+@lru_cache(maxsize=8)
+def _load_rows(year=None) -> tuple:
     """
     패키지에 동봉된 종목 CSV를 읽어 (직무분야, 종목명) 튜플 목록을 반환합니다.
-    pip로 설치된 패키지 안에서도 안전하게 파일을 읽기 위해 importlib.resources 사용.
-    결과는 캐시되어 매번 파일을 다시 읽지 않습니다.
+    year를 주면 그 연도(폴백 포함)의 파일을, 없으면 기본 파일을 읽습니다.
+    pip로 설치된 패키지 안에서도 안전하게 읽기 위해 importlib.resources 사용. 결과는 캐시됨.
     """
     rows = []
-    data_pkg = resources.files("hrdk_law_core").joinpath("data", _CSV_FILENAME)
+    fname = _resolve_cert_filename(year)
+    data_pkg = resources.files("hrdk_law_core").joinpath("data", fname)
     with data_pkg.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for r in reader:
@@ -47,17 +91,17 @@ def _load_rows() -> tuple:
     return tuple(rows)
 
 
-def get_qnet_certs_list() -> list:
-    """종목명만 담은 리스트를 반환합니다."""
-    return [name for _field, name in _load_rows()]
+def get_qnet_certs_list(year=None) -> list:
+    """종목명만 담은 리스트를 반환합니다. year 지정 시 그 연도(폴백 포함) 명단."""
+    return [name for _field, name in _load_rows(year)]
 
 
-def get_qnet_certs_count() -> int:
+def get_qnet_certs_count(year=None) -> int:
     """등록된 종목 개수를 반환합니다."""
-    return len(_load_rows())
+    return len(_load_rows(year))
 
 
-def get_qnet_certs_text(group_by_field: bool = False) -> str:
+def get_qnet_certs_text(group_by_field: bool = False, year=None) -> str:
     """
     종목을 프롬프트 주입용 텍스트로 반환합니다.
 
@@ -65,8 +109,9 @@ def get_qnet_certs_text(group_by_field: bool = False) -> str:
     ----------
     group_by_field : False(기본) → 종목명을 줄바꿈으로 나열 (RADAR 스타일)
                      True        → 직무분야별로 묶어서 "[분야] 종목a, 종목b" (law-monitor 스타일)
+    year           : 종목 명단 기준 연도(법령 시행일자 연도). 미지정 시 기본 파일.
     """
-    rows = _load_rows()
+    rows = _load_rows(year)
 
     if not group_by_field:
         # RADAR 스타일: CSV 헤더 + 종목 나열 (기존 load_qualification_list 출력과 호환)
@@ -89,7 +134,7 @@ def get_qnet_certs_text(group_by_field: bool = False) -> str:
 # 레버 2: 종목 슬림화 (토큰 절감, 누락 위험 0)
 # ──────────────────────────────────────────────────────────
 def get_relevant_certs_text(law_text: str, *, group_by_field: bool = False,
-                            min_certs: int | None = None) -> str:
+                            min_certs: int | None = None, year=None) -> str:
     """
     법령 원문에 '실제로 등장하거나 관련될 가능성이 있는' 종목만 추려서 반환합니다.
 
@@ -110,10 +155,10 @@ def get_relevant_certs_text(law_text: str, *, group_by_field: bool = False,
     -------
     프롬프트 주입용 종목 텍스트 (슬림화 또는 전체)
     """
-    rows = _load_rows()
+    rows = _load_rows(year)
     if not law_text:
         # 법령 텍스트가 없으면 안전하게 전체 반환
-        return get_qnet_certs_text(group_by_field=group_by_field)
+        return get_qnet_certs_text(group_by_field=group_by_field, year=year)
 
     # 안전선: 환경변수 CERTS_MIN_MATCH로 운영 중 튜닝 가능 (기본 15)
     if min_certs is None:
@@ -141,7 +186,7 @@ def get_relevant_certs_text(law_text: str, *, group_by_field: bool = False,
 
     # 3) 안전장치: 너무 적게 걸리면 전체 반환 (누락 방지 원칙)
     if len(matched) < min_certs:
-        return get_qnet_certs_text(group_by_field=group_by_field)
+        return get_qnet_certs_text(group_by_field=group_by_field, year=year)
 
     # 슬림화된 결과를 포맷팅
     if not group_by_field:
@@ -313,16 +358,16 @@ def label_track2_code(code: str) -> str:
 
 
 # 정규화 매칭용 사전 캐시 (정규화키 → 정식 종목명)
-_DICT_NORM_CACHE = None
+# 정규화 매칭용 사전 캐시 (연도별)
+_DICT_NORM_CACHE = {}
 
-def _dict_norm_map():
-    global _DICT_NORM_CACHE
-    if _DICT_NORM_CACHE is None:
-        _DICT_NORM_CACHE = {_normalize_cert(n): n for n in get_qnet_certs_list()}
-    return _DICT_NORM_CACHE
+def _dict_norm_map(year=None):
+    if year not in _DICT_NORM_CACHE:
+        _DICT_NORM_CACHE[year] = {_normalize_cert(n): n for n in get_qnet_certs_list(year)}
+    return _DICT_NORM_CACHE[year]
 
 
-def normalize_cert_string(raw):
+def normalize_cert_string(raw, year=None):
     """
     AI가 반환한 '관련 종목' 문자열을 자격증 사전(541종목)에 있는 정식 종목명만 남깁니다.
 
@@ -336,7 +381,7 @@ def normalize_cert_string(raw):
     s = str(raw or "")
     s = _re.sub(r"\(([^)]*)\)", lambda m: "(" + m.group(1).replace(",", "§") + ")", s)
     toks = [t.strip().replace("§", ",") for t in _re.split(r"[,/]", s) if t.strip()]
-    dnorm = _dict_norm_map()
+    dnorm = _dict_norm_map(year)
     kept, dropped, seen = [], [], set()
     for t in toks:
         name = resolve_current_name(t)
