@@ -189,31 +189,41 @@ def _load_alias_map() -> dict:
 
 def resolve_current_name(cert_name: str) -> str:
     """
-    어떤 종목명(구명칭/표기변형 포함)을 받아 2026 현행 명칭으로 변환합니다.
+    어떤 종목명(구명칭/표기변형 포함)을 받아 현행 명칭으로 변환합니다.
 
     동작 순서:
       1) 현행 종목 목록에 정규화 일치가 있으면 그 현행명 반환
-      2) 별칭 사전(변천사)에 구명칭으로 등록돼 있으면 현행명 반환
-      3) 둘 다 없으면 원본 그대로 반환 (신설/미등록 종목)
+      2) 별칭 사전(변천사)에 구명칭으로 등록돼 있으면 → 그 현행명으로 바꾼 뒤
+         다시 1)~2)를 반복(연쇄 추적). 예: A→B, B→C 가 등록돼 있으면 A→C까지 따라감.
+      3) 더 못 바꾸면 그 값 반환 (신설/미등록 종목은 원본 유지)
+
+    ※ 순환(A→B→A) 방지: 이미 거쳐간 이름은 다시 적용하지 않고 멈춤.
     """
-    norm = _normalize_cert(cert_name)
-
-    # 1) 현행 종목 목록과 정규화 매칭
-    for _field, name in _load_rows():
-        if _normalize_cert(name) == norm:
-            return name
-
-    # 2) 담당자 런타임 오버라이드 우선 (구글 시트에서 추가한 별칭)
-    if norm in _runtime_alias_overrides:
-        return _runtime_alias_overrides[norm]
-
-    # 3) 기본 별칭 사전(구명칭 → 현행명)
     alias = _load_alias_map()
-    if norm in alias:
-        return alias[norm]
+    cur = cert_name
+    seen = set()
+    for _ in range(20):  # 안전 상한(현실적으로 명칭변경이 20번 연쇄될 일은 없음)
+        norm = _normalize_cert(cur)
 
-    # 3) 못 찾으면 원본 유지
-    return cert_name
+        # 1) 현행 종목 목록에 있으면 그게 최종 → 그 표기로 반환
+        for _field, name in _load_rows():
+            if _normalize_cert(name) == norm:
+                return name
+
+        # 순환 방지: 이미 거친 이름이면 중단
+        if norm in seen:
+            break
+        seen.add(norm)
+
+        # 2) 별칭(런타임 오버라이드 우선 → 기본 사전) 에 있으면 다음 이름으로 바꾸고 재시도
+        nxt = _runtime_alias_overrides.get(norm) or alias.get(norm)
+        if nxt and _normalize_cert(nxt) != norm:
+            cur = nxt
+            continue
+        break
+
+    # 3) 더 못 바꾸면 현재 값 유지
+    return cur
 
 
 def get_alias_count() -> int:
