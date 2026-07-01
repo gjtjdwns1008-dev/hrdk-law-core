@@ -296,14 +296,17 @@ def detect_name_change_signal(law_name: str, law_text: str) -> bool:
     return is_qualification_law and has_name_change_words
 
 
-# 담당자가 구글 시트에서 추가한 별칭(런타임 오버라이드) 저장소
+# 런타임 별칭 오버라이드 저장소 (선택적)
+# ※ 명칭변경 처리는 이제 각 시트의 '자격명칭최신화' 탭이 대장을 직접 교체하는 방식으로 이관되었습니다.
+#    이 오버라이드는 기본이 빈 dict라 등록하지 않으면 resolve_current_name은 cert_aliases.csv만 사용합니다.
+#    (테스트/특수 상황에서 코드로 임시 별칭을 주입하고 싶을 때만 사용)
 _runtime_alias_overrides: dict = {}
 
 
 def register_alias_overrides(overrides: dict) -> None:
     """
-    담당자가 구글 시트 '자격명칭_별칭사전' 탭에 추가한 별칭을 런타임에 등록합니다.
-    기본 사전(cert_aliases.csv)에 더해 적용되며, resolve_current_name()에서 함께 조회됩니다.
+    (선택) 런타임에 임시 별칭을 등록합니다. 등록하면 cert_aliases.csv에 더해 resolve_current_name이 함께 조회.
+    ※ 운영상의 자격 명칭변경은 '자격명칭최신화' 탭(대장 직접 교체)으로 처리하므로 보통 호출하지 않습니다.
     overrides: {구명칭: 현행명칭} 형태
     """
     global _runtime_alias_overrides
