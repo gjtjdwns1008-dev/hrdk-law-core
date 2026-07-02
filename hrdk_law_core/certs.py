@@ -203,7 +203,9 @@ def get_relevant_certs_text(law_text: str, *, group_by_field: bool = False,
 # ──────────────────────────────────────────────────────────
 # 자격명칭 별칭(변천사) 처리 — 구명칭 ↔ 2026 현행명칭
 # ──────────────────────────────────────────────────────────
-_ALIAS_FILENAME = "cert_aliases.csv"
+# 별칭(구명칭→현행명) 소스는 각 시트의 '자격명칭최신화' 탭입니다.
+# 배치가 그 탭을 읽어 register_alias_overrides()로 주입하며, resolve_current_name이 이를 사용합니다.
+# (과거 cert_aliases.csv는 폐지되었고, 그 265개 이력은 자격명칭최신화 탭으로 이관되었습니다.)
 
 
 def _normalize_cert(s: str) -> str:
@@ -212,25 +214,13 @@ def _normalize_cert(s: str) -> str:
     return re.sub(r"[·\s\(\)\[\]ㆍ・,]", "", str(s)).strip()
 
 
-@lru_cache(maxsize=2)
 def _load_alias_map() -> dict:
     """
-    구명칭(정규화) → 현행 2026 명칭 매핑을 반환합니다.
-    cert_aliases.csv가 없으면 빈 dict (별칭 기능 비활성, 오류 없음).
+    구명칭(정규화) → 현행 명칭 매핑을 반환합니다.
+    이제 별칭은 '자격명칭최신화' 탭에서 주입되므로(런타임 오버라이드), 여기서는 그 주입분을 돌려줍니다.
+    주입 전이면 빈 dict (별칭 없음, 오류 없음).
     """
-    mapping = {}
-    try:
-        data_pkg = resources.files("hrdk_law_core").joinpath("data", _ALIAS_FILENAME)
-        with data_pkg.open("r", encoding="utf-8") as f:
-            for r in csv.DictReader(f):
-                old = (r.get("구명칭") or "").strip()
-                # 새 컬럼명 '현행명칭' 우선, 없으면 옛 '현행명칭_2026' 폴백(하위호환)
-                new = (r.get("현행명칭") or r.get("현행명칭_2026") or "").strip()
-                if old and new:
-                    mapping[_normalize_cert(old)] = new
-    except (FileNotFoundError, ModuleNotFoundError):
-        pass
-    return mapping
+    return dict(_runtime_alias_overrides)
 
 
 def resolve_current_name(cert_name: str) -> str:
@@ -245,7 +235,6 @@ def resolve_current_name(cert_name: str) -> str:
 
     ※ 순환(A→B→A) 방지: 이미 거쳐간 이름은 다시 적용하지 않고 멈춤.
     """
-    alias = _load_alias_map()
     cur = cert_name
     seen = set()
     for _ in range(20):  # 안전 상한(현실적으로 명칭변경이 20번 연쇄될 일은 없음)
@@ -261,8 +250,8 @@ def resolve_current_name(cert_name: str) -> str:
             break
         seen.add(norm)
 
-        # 2) 별칭(런타임 오버라이드 우선 → 기본 사전) 에 있으면 다음 이름으로 바꾸고 재시도
-        nxt = _runtime_alias_overrides.get(norm) or alias.get(norm)
+        # 2) 별칭(자격명칭최신화 탭에서 주입된 구명칭→현행명)에 있으면 바꾸고 재시도(연쇄 추적)
+        nxt = _runtime_alias_overrides.get(norm)
         if nxt and _normalize_cert(nxt) != norm:
             cur = nxt
             continue
@@ -296,18 +285,16 @@ def detect_name_change_signal(law_name: str, law_text: str) -> bool:
     return is_qualification_law and has_name_change_words
 
 
-# 런타임 별칭 오버라이드 저장소 (선택적)
-# ※ 명칭변경 처리는 이제 각 시트의 '자격명칭최신화' 탭이 대장을 직접 교체하는 방식으로 이관되었습니다.
-#    이 오버라이드는 기본이 빈 dict라 등록하지 않으면 resolve_current_name은 cert_aliases.csv만 사용합니다.
-#    (테스트/특수 상황에서 코드로 임시 별칭을 주입하고 싶을 때만 사용)
+# 런타임 별칭 저장소 — '자격명칭최신화' 탭에서 배치가 읽어 주입하는 {구명칭→현행명} 매핑.
+#    resolve_current_name이 이 매핑으로 구명칭을 현행명으로 변환(연쇄 추적 포함).
+#    주입 전이면 빈 dict → 변환 없이 원본 유지.
 _runtime_alias_overrides: dict = {}
 
 
 def register_alias_overrides(overrides: dict) -> None:
     """
-    (선택) 런타임에 임시 별칭을 등록합니다. 등록하면 cert_aliases.csv에 더해 resolve_current_name이 함께 조회.
-    ※ 운영상의 자격 명칭변경은 '자격명칭최신화' 탭(대장 직접 교체)으로 처리하므로 보통 호출하지 않습니다.
-    overrides: {구명칭: 현행명칭} 형태
+    '자격명칭최신화' 탭에서 읽은 별칭({구명칭: 현행명})을 런타임에 등록합니다.
+    배치(RADAR/monitor)가 실행 시작 시 호출하며, 이후 resolve_current_name이 이를 사용합니다.
     """
     global _runtime_alias_overrides
     cleaned = {}
